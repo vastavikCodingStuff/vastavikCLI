@@ -6,4 +6,4 @@
 ### Architecture & Compatibility
 - **Target**: Android ARM64-v8a (64-bit only)
 - **Subsystem**: Minimal Debian ARM64 rootfs with `apt`
-- **Commit SHA**: f7383997c877f75d86fc30d2aa61b1dfe3882173
+- **Commit SHA**: db1e12acff016ae135d370633e597dcaa73ab84f
