@@ -76,30 +76,70 @@ class TerminalSession(
             distroId == "debian" -> legacyDebian
             else -> isolatedFallback
         }
-        // Check for either bash or sh (Alpine uses /bin/sh)
-        val shellFile = File(targetRoot, shellPath.removePrefix("/"))
-        val hasShell = shellFile.exists() || File(targetRoot, "bin/bash").exists() || File(targetRoot, "bin/sh").exists()
-        if (!targetRoot.exists() || !hasShell) {
-            Log.e(TAG, "Distro $distroId not installed at ${targetRoot.absolutePath} (missing $shellPath)")
-            appendToBuffer("VASTAVIK CLI: $distroId not installed. Open right drawer → ARM64 Distro Center to install.\r\n")
-            // Hint for legacy debian asset extraction
-            if (distroId == "debian") {
-                appendToBuffer("Or wait for embedded Debian extraction to finish.\r\n")
-            }
+        // VASTAVIK CLI Critical Fix: ensure proot exists and handle shell fallback + guest dirs
+        val prootBinary = try {
+            com.shellzero.installer.ProotManager.ensureProotInstalled(context)
+        } catch (e: Exception) {
+            Log.e(TAG, "Proot not available", e)
+            appendToBuffer("Failed to start shell: proot binary missing (${e.message})\r\n")
             return
+        }
+
+        // Validate distro root exists
+        if (!targetRoot.exists()) {
+            Log.e(TAG, "Distro $distroId rootfs does not exist at ${targetRoot.absolutePath}")
+            appendToBuffer("VASTAVIK CLI: $distroId not installed at ${targetRoot.absolutePath}. Please extract it first.\r\n")
+            if (distroId == "debian") appendToBuffer("Or wait for embedded Debian extraction to finish.\r\n")
+            return
+        }
+
+        // Ensure guest /root and /tmp exist inside extracted rootfs (host FS must have them before Pty)
+        try {
+            File(targetRoot, "root").mkdirs()
+            File(targetRoot, "tmp").mkdirs()
+            // Also ensure /dev/shm
+            File(targetRoot, "dev/shm").mkdirs()
+        } catch (_: Exception) {}
+
+        // Handle Shell Fallback (Alpine vs Debian/Ubuntu/Arch/Kali)
+        var effectiveShell = shellPath
+        val shellFileCheck = File(targetRoot, effectiveShell.removePrefix("/"))
+        if (!shellFileCheck.exists()) {
+            // Try fallback
+            val bashExists = File(targetRoot, "bin/bash").exists()
+            val shExists = File(targetRoot, "bin/sh").exists()
+            effectiveShell = when {
+                effectiveShell == "/bin/bash" && !bashExists && shExists -> {
+                    Log.w(TAG, "Shell $shellPath missing, falling back to /bin/sh for $distroId")
+                    "/bin/sh"
+                }
+                effectiveShell == "/bin/sh" && !shExists && bashExists -> "/bin/bash"
+                !bashExists && shExists -> "/bin/sh"
+                else -> effectiveShell
+            }
+            val finalCheck = File(targetRoot, effectiveShell.removePrefix("/"))
+            if (!finalCheck.exists()) {
+                Log.e(TAG, "No shell found for $distroId at ${targetRoot.absolutePath} (tried $shellPath, fallback $effectiveShell)")
+                appendToBuffer("VASTAVIK CLI: $distroId missing shell $effectiveShell\r\n")
+                return
+            }
         }
 
         val command: Array<String> = when (distroId) {
             "debian" -> {
-                // Prefer legacy builder if target is legacy path, else distro builder with dynamic shell
+                // Prefer legacy builder if target is legacy path and shell is bash, else dynamic
                 val legacyDir = DebianInstaller.getDebianDir(context)
-                if (targetRoot.absolutePath == legacyDir.absolutePath && shellPath == "/bin/bash") {
-                    DebianInstaller.buildProotCommand(context)
+                if (targetRoot.absolutePath == legacyDir.absolutePath && effectiveShell == "/bin/bash") {
+                    // Ensure proot still exists for legacy path
+                    DebianInstaller.buildProotCommand(context).also { cmd ->
+                        // Replace proot path with ensured binary if needed
+                        if (cmd.isNotEmpty()) cmd[0] = prootBinary.absolutePath
+                    }
                 } else {
-                    buildProotForDistro(context, targetRoot, shellPath)
+                    buildProotForDistro(context, targetRoot, effectiveShell, prootBinary)
                 }
             }
-            else -> buildProotForDistro(context, targetRoot, shellPath)
+            else -> buildProotForDistro(context, targetRoot, effectiveShell, prootBinary)
         }
         // VASTAVIK CLI fix: ensure PS1, TERM, SHELL for interactive prompt (Alpine /bin/sh needs PS1)
         val env = mapOf(
@@ -108,10 +148,12 @@ class TerminalSession(
             "LANG" to "C.UTF-8",
             "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "TMPDIR" to "/tmp",
-            "SHELL" to shellPath,
+            "SHELL" to effectiveShell,
             "PS1" to "\\u@\\h:\\w\\# "
         )
-        val cwd = File(targetRoot, "root").let { if (it.exists()) it.absolutePath else targetRoot.absolutePath }
+        // CRITICAL: Host working directory must ALWAYS be context.filesDir, NOT the inner chroot directory
+        // The chroot working directory is set via PRoot's -w /root flag
+        val cwd = context.filesDir.absolutePath
 
         Log.i(TAG, "Starting session $sessionId: ${command.joinToString(" ")}")
 
@@ -273,10 +315,12 @@ class TerminalSession(
     fun getSessionId(): String = sessionId
     fun getRootfsPath(): String = distroRoot?.absolutePath ?: ""
 
-    private fun buildProotForDistro(context: Context, root: File, shell: String = "/bin/bash"): Array<String> {
+    private fun buildProotForDistro(context: Context, root: File, shell: String = "/bin/bash", prootFile: File? = null): Array<String> {
         val filesDir = context.filesDir.absolutePath
-        val proot = "$filesDir/bin/proot"
+        val proot = prootFile?.absolutePath ?: "$filesDir/bin/proot"
         val rootPath = root.absolutePath
+        // Ensure tmp dir exists on host for bind
+        try { File(root, "tmp").mkdirs() } catch (_: Exception) {}
         // VASTAVIK CLI spec: dynamic rootfsDirectory with DNS guarantee, interactive -i -l
         return arrayOf(
             proot,
@@ -286,7 +330,7 @@ class TerminalSession(
             "-b", "/proc",
             "-b", "/sys",
             "-b", "/system",
-            "-b", "$rootPath/tmp:/tmp",
+            "-b", "${File(root, "tmp").absolutePath}:/tmp",
             "-b", "$rootPath/dev/shm:/dev/shm",
             "-w", "/root",
             "/usr/bin/env", "-i",
