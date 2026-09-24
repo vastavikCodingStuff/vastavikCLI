@@ -1,5 +1,6 @@
 package com.shellzero.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.*
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -349,6 +350,7 @@ fun SessionDrawerContent(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SessionItem(
     session: SessionState,

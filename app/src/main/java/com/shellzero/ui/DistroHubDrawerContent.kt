@@ -75,7 +75,7 @@ fun DistroHubDrawerContent(
                     )
                     Spacer(Modifier.height(3.dp))
                     Text(
-                        text = "Browse • Download • Launch — $FILES_DIR/distros/<name>",
+                        text = "Browse • Download • Launch — \$FILES_DIR/distros/<name>",
                         color = TextMuted,
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
