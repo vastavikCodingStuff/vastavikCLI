@@ -13,12 +13,12 @@ import com.shellzero.distro.DistroDownloader
 import com.shellzero.installer.DebianInstaller
 import com.shellzero.service.TerminalSessionService
 import com.shellzero.terminal.SessionManager
-import com.shellzero.ui.ShellZeroApp
+import com.shellzero.ui.VastavikApp
 import com.shellzero.ui.TerminalViewModel
 import kotlinx.coroutines.launch
 
 /**
- * ShellZero MainActivity
+ * VASTAVIK CLI MainActivity
  * - Requests POST_NOTIFICATIONS on Android 13+
  * - Triggers DebianInstaller.installIfNeeded() on first launch with progress UI
  * - Starts TerminalSessionService (unkillable foreground)
@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            ShellZeroApp(viewModel = viewModel)
+            VastavikApp(viewModel = viewModel)
         }
     }
 

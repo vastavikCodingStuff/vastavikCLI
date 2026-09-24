@@ -27,7 +27,8 @@ class TerminalSession(
     initialRows: Int = 24,
     initialCols: Int = 80,
     private val distroId: String = "debian",
-    private val distroRoot: File? = null
+    private val distroRoot: File? = null,
+    private val shellPath: String = "/bin/bash"
 ) {
     companion object {
         private const val TAG = "TerminalSession"
@@ -64,19 +65,23 @@ class TerminalSession(
         }
 
         // Resolve distro root: use injected distroRoot, else isolated distros/<id> or legacy debian
+        // VASTAVIK CLI fix: never hardcode to $FILES_DIR/debian; always route to $FILES_DIR/distros/<distroId>
         val filesDir = context.filesDir
         val isolatedFallback = File(filesDir, "distros/$distroId")
         val legacyDebian = File(filesDir, "debian")
         val targetRoot: File = distroRoot ?: when {
-            isolatedFallback.exists() && File(isolatedFallback, "bin/bash").exists() -> isolatedFallback
-            distroId == "debian" && legacyDebian.exists() && File(legacyDebian, "bin/bash").exists() -> legacyDebian
+            isolatedFallback.exists() && (File(isolatedFallback, "bin/bash").exists() || File(isolatedFallback, "bin/sh").exists()) -> isolatedFallback
+            distroId == "debian" && legacyDebian.exists() && (File(legacyDebian, "bin/bash").exists() || File(legacyDebian, "bin/sh").exists()) -> legacyDebian
             isolatedFallback.exists() -> isolatedFallback
             distroId == "debian" -> legacyDebian
             else -> isolatedFallback
         }
-        if (!targetRoot.exists() || !File(targetRoot, "bin/bash").exists()) {
-            Log.e(TAG, "Distro $distroId not installed at ${targetRoot.absolutePath}")
-            appendToBuffer("ShellZero: $distroId not installed. Open right drawer → ARM64 Distro Center to install.\r\n")
+        // Check for either bash or sh (Alpine uses /bin/sh)
+        val shellFile = File(targetRoot, shellPath.removePrefix("/"))
+        val hasShell = shellFile.exists() || File(targetRoot, "bin/bash").exists() || File(targetRoot, "bin/sh").exists()
+        if (!targetRoot.exists() || !hasShell) {
+            Log.e(TAG, "Distro $distroId not installed at ${targetRoot.absolutePath} (missing $shellPath)")
+            appendToBuffer("VASTAVIK CLI: $distroId not installed. Open right drawer → ARM64 Distro Center to install.\r\n")
             // Hint for legacy debian asset extraction
             if (distroId == "debian") {
                 appendToBuffer("Or wait for embedded Debian extraction to finish.\r\n")
@@ -86,15 +91,15 @@ class TerminalSession(
 
         val command: Array<String> = when (distroId) {
             "debian" -> {
-                // Prefer legacy builder if target is legacy path, else distro builder
+                // Prefer legacy builder if target is legacy path, else distro builder with dynamic shell
                 val legacyDir = DebianInstaller.getDebianDir(context)
-                if (targetRoot.absolutePath == legacyDir.absolutePath) {
+                if (targetRoot.absolutePath == legacyDir.absolutePath && shellPath == "/bin/bash") {
                     DebianInstaller.buildProotCommand(context)
                 } else {
-                    buildProotForDistro(context, targetRoot)
+                    buildProotForDistro(context, targetRoot, shellPath)
                 }
             }
-            else -> buildProotForDistro(context, targetRoot)
+            else -> buildProotForDistro(context, targetRoot, shellPath)
         }
         val env = mapOf(
             "HOME" to "/root",
@@ -127,7 +132,7 @@ class TerminalSession(
                 }
             }
 
-            appendToBuffer("ShellZero $distroId (arm64) • PRoot • PID ${ptyProcess?.pid}\r\n")
+            appendToBuffer("VASTAVIK CLI v2.0 (ARM64 Subsystem) • $distroId • PRoot • PID ${ptyProcess?.pid}\r\n")
             appendToBuffer("Type 'apt update && apt upgrade' to initialize package manager.\r\n\r\n")
 
         } catch (e: Exception) {
@@ -263,11 +268,13 @@ class TerminalSession(
     }
 
     fun getSessionId(): String = sessionId
+    fun getRootfsPath(): String = distroRoot?.absolutePath ?: ""
 
-    private fun buildProotForDistro(context: Context, root: File): Array<String> {
+    private fun buildProotForDistro(context: Context, root: File, shell: String = "/bin/bash"): Array<String> {
         val filesDir = context.filesDir.absolutePath
         val proot = "$filesDir/bin/proot"
         val rootPath = root.absolutePath
+        // VASTAVIK CLI spec: dynamic rootfsDirectory with DNS guarantee
         return arrayOf(
             proot,
             "-r", rootPath,
@@ -284,7 +291,7 @@ class TerminalSession(
             "TERM=xterm-256color",
             "LANG=C.UTF-8",
             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            "/bin/bash", "--login"
+            shell, "--login"
         )
     }
 }

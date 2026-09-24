@@ -11,8 +11,8 @@ android {
         applicationId = "com.shellzero"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.1.1"
+        versionCode = 4
+        versionName = "2.0.0"
 
         // Only arm64-v8a per spec (strictly no x86)
         ndk {

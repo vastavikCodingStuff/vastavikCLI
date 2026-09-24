@@ -436,7 +436,7 @@ private fun TerminalHeader(
                     .background(AccentGreen)
             )
             androidx.compose.material3.Text(
-                text = "ShellZero • $distroName arm64 • $sessionName",
+                text = "VASTAVIK CLI • $distroName arm64 • $sessionName",
                 color = TextPrimary,
                 fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace
@@ -671,7 +671,7 @@ private fun stripAnsi(input: String): String {
 // ──────────────────────────────────────────────────────────────────────
 
 @Composable
-fun ShellZeroApp(
+fun VastavikApp(
     viewModel: TerminalViewModel = viewModel()
 ) {
     MaterialTheme(
@@ -686,7 +686,7 @@ fun ShellZeroApp(
         val leftState = rememberDrawerState(initialValue = DrawerValue.Closed)
         val rightOpen = remember { mutableStateOf(false) }
 
-        ShellZeroDualDrawerScaffold(
+        VastavikDualDrawerScaffold(
             leftDrawerState = leftState,
             rightOpen = rightOpen,
             onKeyboardToggle = {},
@@ -701,7 +701,7 @@ fun ShellZeroApp(
  * Standalone entry without drawers (for preview / fallback).
  */
 @Composable
-fun ShellZeroAppWithoutDrawers() {
+fun VastavikAppWithoutDrawers() {
     MaterialTheme(
         colorScheme = darkColorScheme(
             background = ObsidianBg,
