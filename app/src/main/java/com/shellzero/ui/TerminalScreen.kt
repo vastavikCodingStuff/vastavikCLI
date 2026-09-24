@@ -13,14 +13,20 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -306,19 +312,58 @@ fun TerminalScreen(
                 )
             }
 
-            // Terminal canvas
+            // Terminal canvas — VASTAVIK CLI fix: FocusRequester + hidden IME for soft keyboard
+            val keyboardController = LocalSoftwareKeyboardController.current
+            val focusRequester = remember { FocusRequester() }
+            val focusManager = LocalFocusManager.current
+            var textInput by remember { mutableStateOf("") }
+
+            // Auto-focus on first display or session change
+            LaunchedEffect(viewModel.activeSessionName) {
+                try {
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                } catch (_: Exception) {}
+            }
+
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .background(TerminalBg)
                     .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    }
             ) {
-                // New modern approach: render buffer as scrollable text with monospace
-                // For full VT100 fidelity, replace with `TerminalView` using terminal-emulator lib
-                // Here we provide performant scroll buffer with selectable text
+                // Hidden input connection to capture standard Android software keyboard keystrokes
+                BasicTextField(
+                    value = textInput,
+                    onValueChange = { newText ->
+                        if (newText.isNotEmpty()) {
+                            // Direct pipe to PTY stdin per spec
+                            viewModel.sendInput(newText)
+                            textInput = ""
+                        }
+                    },
+                    modifier = Modifier
+                        .size(1.dp)
+                        .alpha(0f)
+                        .focusRequester(focusRequester),
+                    textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
+                    cursorBrush = SolidColor(Color.Transparent),
+                    keyboardOptions = KeyboardOptions(
+                        autoCorrect = false,
+                        keyboardType = KeyboardType.Ascii,
+                        imeAction = androidx.compose.ui.text.input.ImeAction.None
+                    )
+                )
 
-                // Hidden input field to capture soft keyboard input
+                // Fallback hidden field for legacy diff logic (kept for hardware key handling)
                 BasicTextField(
                     value = textFieldValue,
                     onValueChange = { newValue ->
@@ -327,14 +372,10 @@ fun TerminalScreen(
                         val new = newValue.text
                         if (new.length > old.length) {
                             val inserted = new.substring(old.length)
-                            // Handle enter, backspace, etc.
-                            // BasicTextField already handles composition; we forward
                             viewModel.sendInput(inserted)
                         } else if (new.length < old.length) {
-                            // Backspace
                             viewModel.sendRawBytes("\u007f") // DEL
                         }
-                        // Reset to empty to keep field ready for next input (like Termux)
                         textFieldValue = TextFieldValue("")
                     },
                     textStyle = TextStyle(
@@ -345,7 +386,7 @@ fun TerminalScreen(
                     keyboardOptions = KeyboardOptions.Default,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(1.dp) // invisible but focusable
+                        .height(1.dp) // invisible but focusable (legacy)
                         .onPreviewKeyEvent { event ->
                             // Intercept hardware keys, DPAD, etc.
                             if (event.type == KeyEventType.KeyDown) {
@@ -374,7 +415,10 @@ fun TerminalScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .clickable { /* focus hidden field - need focus requester */ },
+                        .clickable {
+                            focusRequester.requestFocus()
+                            keyboardController?.show()
+                        },
                     verticalArrangement = Arrangement.Bottom
                 ) {
                     items(lines.size) { idx ->

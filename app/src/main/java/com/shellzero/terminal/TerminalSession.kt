@@ -101,12 +101,15 @@ class TerminalSession(
             }
             else -> buildProotForDistro(context, targetRoot, shellPath)
         }
+        // VASTAVIK CLI fix: ensure PS1, TERM, SHELL for interactive prompt (Alpine /bin/sh needs PS1)
         val env = mapOf(
             "HOME" to "/root",
             "TERM" to "xterm-256color",
             "LANG" to "C.UTF-8",
             "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            "TMPDIR" to "/tmp"
+            "TMPDIR" to "/tmp",
+            "SHELL" to shellPath,
+            "PS1" to "\\u@\\h:\\w\\# "
         )
         val cwd = File(targetRoot, "root").let { if (it.exists()) it.absolutePath else targetRoot.absolutePath }
 
@@ -274,7 +277,7 @@ class TerminalSession(
         val filesDir = context.filesDir.absolutePath
         val proot = "$filesDir/bin/proot"
         val rootPath = root.absolutePath
-        // VASTAVIK CLI spec: dynamic rootfsDirectory with DNS guarantee
+        // VASTAVIK CLI spec: dynamic rootfsDirectory with DNS guarantee, interactive -i -l
         return arrayOf(
             proot,
             "-r", rootPath,
@@ -291,7 +294,9 @@ class TerminalSession(
             "TERM=xterm-256color",
             "LANG=C.UTF-8",
             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            shell, "--login"
+            "SHELL=$shell",
+            "PS1=\\u@\\h:\\w\\# ",
+            shell, "-i", "-l"
         )
     }
 }
