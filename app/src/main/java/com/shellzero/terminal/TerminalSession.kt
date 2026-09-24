@@ -1,0 +1,354 @@
+package com.shellzero.terminal
+
+import android.content.Context
+import android.util.Log
+import com.shellzero.installer.DebianInstaller
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import java.io.File
+import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * TerminalSession - Manages a single PRoot shell instance
+ *
+ * Responsibilities:
+ *  - Spawns PRoot command via PtyProcess
+ *  - Manages stdio streams (VT100/ANSI)
+ *  - Handles window resize events (resizePty)
+ *  - Exposes terminal buffer as StateFlow for Compose
+ *  - Cleans up on destroy
+ */
+class TerminalSession(
+    private val context: Context,
+    private val sessionId: String = "session-${System.currentTimeMillis()}",
+    initialRows: Int = 24,
+    initialCols: Int = 80,
+    private val distroId: String = "debian",
+    private val distroRoot: File? = null
+) {
+    companion object {
+        private const val TAG = "TerminalSession"
+    }
+
+    private var ptyProcess: PtyProcess? = null
+    private var onExitListener: ((Int) -> Unit)? = null
+    fun setOnExitListener(listener: (Int) -> Unit) { onExitListener = listener }
+    fun getPtyProcess(): PtyProcess? = ptyProcess
+    fun getDistroId(): String = distroId
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // Terminal buffer - simple string builder + StateFlow for Compose
+    // For production, integrate with a full VT emulator like `com.termux:terminal-emulator`
+    private val _output = MutableStateFlow(StringBuilder())
+    private val _displayText = MutableStateFlow("")
+    val displayText: StateFlow<String> = _displayText
+
+    private val _isRunning = MutableStateFlow(false)
+    val isRunning: StateFlow<Boolean> = _isRunning
+
+    var rows: Int = initialRows
+        private set
+    var cols: Int = initialCols
+        private set
+
+    private var readerJob: Job? = null
+    private var errorReaderJob: Job? = null
+
+    fun start() {
+        if (_isRunning.value) {
+            Log.w(TAG, "Session $sessionId already running")
+            return
+        }
+
+        // Resolve distro root: use injected distroRoot, else isolated distros/<id> or legacy debian
+        val filesDir = context.filesDir
+        val isolatedFallback = File(filesDir, "distros/$distroId")
+        val legacyDebian = File(filesDir, "debian")
+        val targetRoot: File = distroRoot ?: when {
+            isolatedFallback.exists() && File(isolatedFallback, "bin/bash").exists() -> isolatedFallback
+            distroId == "debian" && legacyDebian.exists() && File(legacyDebian, "bin/bash").exists() -> legacyDebian
+            isolatedFallback.exists() -> isolatedFallback
+            distroId == "debian" -> legacyDebian
+            else -> isolatedFallback
+        }
+        if (!targetRoot.exists() || !File(targetRoot, "bin/bash").exists()) {
+            Log.e(TAG, "Distro $distroId not installed at ${targetRoot.absolutePath}")
+            appendToBuffer("ShellZero: $distroId not installed. Open right drawer → ARM64 Distro Center to install.\r\n")
+            // Hint for legacy debian asset extraction
+            if (distroId == "debian") {
+                appendToBuffer("Or wait for embedded Debian extraction to finish.\r\n")
+            }
+            return
+        }
+
+        val command: Array<String> = when (distroId) {
+            "debian" -> {
+                // Prefer legacy builder if target is legacy path, else distro builder
+                val legacyDir = DebianInstaller.getDebianDir(context)
+                if (targetRoot.absolutePath == legacyDir.absolutePath) {
+                    DebianInstaller.buildProotCommand(context)
+                } else {
+                    buildProotForDistro(context, targetRoot)
+                }
+            }
+            else -> buildProotForDistro(context, targetRoot)
+        }
+        val env = mapOf(
+            "HOME" to "/root",
+            "TERM" to "xterm-256color",
+            "LANG" to "C.UTF-8",
+            "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "TMPDIR" to "/tmp"
+        )
+        val cwd = File(targetRoot, "root").let { if (it.exists()) it.absolutePath else targetRoot.absolutePath }
+
+        Log.i(TAG, "Starting session $sessionId: ${command.joinToString(" ")}")
+
+        try {
+            ptyProcess = PtyProcess.spawn(command, env, cwd, rows, cols)
+            _isRunning.value = true
+            startReaderThreads()
+
+            // Monitor process exit
+            scope.launch {
+                try {
+                    val exitCode = withContext(Dispatchers.IO) { ptyProcess?.waitFor() ?: -1 }
+                    Log.i(TAG, "Session $sessionId exited with $exitCode")
+                    withContext(Dispatchers.Main) {
+                        _isRunning.value = false
+                        appendToBuffer("\r\n[Process exited with code $exitCode]\r\n")
+                        onExitListener?.invoke(exitCode)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "WaitFor failed", e)
+                }
+            }
+
+            appendToBuffer("ShellZero $distroId (arm64) • PRoot • PID ${ptyProcess?.pid}\r\n")
+            appendToBuffer("Type 'apt update && apt upgrade' to initialize package manager.\r\n\r\n")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start session", e)
+            appendToBuffer("Failed to start shell: ${e.message}\r\n")
+            _isRunning.value = false
+        }
+    }
+
+    private fun startReaderThreads() {
+        val proc = ptyProcess ?: return
+
+        readerJob = scope.launch {
+            val buffer = ByteArray(8192)
+            val input = proc.inputStream
+            try {
+                while (isActive && proc.isAlive) {
+                    val n = withContext(Dispatchers.IO) {
+                        try { input.read(buffer) } catch (e: IOException) { -1 }
+                    }
+                    if (n == -1) break
+                    if (n > 0) {
+                        val text = String(buffer, 0, n, Charsets.UTF_8)
+                        appendToBuffer(text)
+                    }
+                }
+            } catch (e: Exception) {
+                if (isActive) Log.e(TAG, "Reader error", e)
+            }
+        }
+
+        // Only needed for ProcessBuilder fallback (native PTY merges stderr)
+        if (proc.errorStream.available() >= 0) {
+            errorReaderJob = scope.launch {
+                val buffer = ByteArray(4096)
+                val err = proc.errorStream
+                try {
+                    while (isActive && proc.isAlive) {
+                        val n = withContext(Dispatchers.IO) {
+                            try {
+                                if (err.available() > 0) err.read(buffer) else {
+                                    delay(50); 0
+                                }
+                            } catch (_: IOException) { -1 }
+                        }
+                        if (n == -1) break
+                        if (n > 0) {
+                            val text = String(buffer, 0, n, Charsets.UTF_8)
+                            appendToBuffer(text)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun appendToBuffer(text: String) {
+        // Keep buffer bounded to avoid OOM (Termux uses 64k lines)
+        synchronized(_output) {
+            _output.value.append(text)
+            // Trim if > 512KB
+            if (_output.value.length > 512 * 1024) {
+                val excess = _output.value.length - 400 * 1024
+                _output.value.delete(0, excess)
+            }
+            _displayText.value = _output.value.toString()
+        }
+    }
+
+    /**
+     * Send input to shell. Applies CTRL/ALT latching handled in UI, but also supports raw bytes.
+     */
+    fun write(data: String) {
+        write(data.toByteArray(Charsets.UTF_8))
+    }
+
+    fun write(bytes: ByteArray) {
+        val proc = ptyProcess
+        if (proc == null || !_isRunning.value) {
+            Log.w(TAG, "Write ignored, no process")
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            try {
+                proc.outputStream.write(bytes)
+                proc.outputStream.flush()
+            } catch (e: IOException) {
+                Log.e(TAG, "Write failed", e)
+            }
+        }
+    }
+
+    /**
+     * Send single byte (for CTRL codes)
+     */
+    fun sendControlByte(b: Int) {
+        write(byteArrayOf(b.toByte()))
+    }
+
+    /**
+     * VT100 resize - called from Compose when view size changes.
+     */
+    fun resizePty(newRows: Int, newCols: Int, xPixel: Int = 0, yPixel: Int = 0) {
+        if (newRows == rows && newCols == cols) return
+        rows = newRows
+        cols = newCols
+        Log.d(TAG, "resizePty $cols x $rows for $sessionId")
+        ptyProcess?.resizePty(newRows, newCols, xPixel, yPixel)
+        // Also send SIGWINCH is handled inside PtyProcess
+    }
+
+    /**
+     * Clear buffer (e.g., clear command or Ctrl+L)
+     */
+    fun clearBuffer() {
+        synchronized(_output) {
+            _output.value.clear()
+            _displayText.value = ""
+        }
+    }
+
+    fun destroy() {
+        Log.i(TAG, "Destroying session $sessionId")
+        readerJob?.cancel()
+        errorReaderJob?.cancel()
+        scope.cancel()
+        try {
+            ptyProcess?.destroy()
+        } catch (e: Exception) {
+            Log.w(TAG, "destroy pty failed", e)
+        }
+        _isRunning.value = false
+    }
+
+    fun getSessionId(): String = sessionId
+
+    private fun buildProotForDistro(context: Context, root: File): Array<String> {
+        val filesDir = context.filesDir.absolutePath
+        val proot = "$filesDir/bin/proot"
+        val rootPath = root.absolutePath
+        return arrayOf(
+            proot,
+            "-r", rootPath,
+            "-0",
+            "-b", "/dev",
+            "-b", "/proc",
+            "-b", "/sys",
+            "-b", "/system",
+            "-b", "$rootPath/tmp:/tmp",
+            "-b", "$rootPath/dev/shm:/dev/shm",
+            "-w", "/root",
+            "/usr/bin/env", "-i",
+            "HOME=/root",
+            "TERM=xterm-256color",
+            "LANG=C.UTF-8",
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "/bin/bash", "--login"
+        )
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Singleton manager - holds all sessions for the foreground service
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Legacy manager - now delegates to SessionManager for unified multi-session engine.
+ * Kept for backward compatibility with TerminalSessionService and older callers.
+ */
+object TerminalSessionManager {
+    private const val TAG = "TerminalSessionManager"
+
+    // Legacy map retained for direct TerminalSession callers, but primary source is SessionManager
+    private val legacySessions = ConcurrentHashMap<String, TerminalSession>()
+    private val idCounter = AtomicInteger(0)
+
+    val sessionCount: Int get() = SessionManager.sessionCount.coerceAtLeast(legacySessions.size)
+    val hasSessions: Boolean get() = SessionManager.hasSessions || legacySessions.isNotEmpty()
+
+    fun createSession(context: Context, rows: Int = 24, cols: Int = 80): TerminalSession {
+        // Delegate to new engine
+        val state = SessionManager.createSession(context, "debian", "Debian", rows = rows, cols = cols, startImmediately = false)
+        // Also track in legacy map for callers that expect legacy behavior
+        legacySessions[state.id] = state.terminalEmulator
+        Log.i(TAG, "Created via SessionManager id=${state.id} legacySize=${legacySessions.size}")
+        return state.terminalEmulator
+    }
+
+    fun getSession(id: String): TerminalSession? =
+        SessionManager.getSession(id)?.terminalEmulator ?: legacySessions[id]
+
+    fun getAllSessions(): List<TerminalSession> =
+        SessionManager.getAllSessions().map { it.terminalEmulator } + legacySessions.values.filter { ls -> SessionManager.getAllSessions().none { it.id == ls.getSessionId() } }
+
+    fun getOrCreateDefault(context: Context): TerminalSession {
+        val existing = SessionManager.getAllSessions().firstOrNull()?.terminalEmulator
+        if (existing != null) return existing
+        if (legacySessions.isNotEmpty()) return legacySessions.values.first()
+        val state = SessionManager.createSession(context, "debian", "Debian")
+        legacySessions[state.id] = state.terminalEmulator
+        return state.terminalEmulator
+    }
+
+    fun removeSession(id: String) {
+        legacySessions.remove(id)?.destroy()
+        SessionManager.closeSession(id)
+        Log.i(TAG, "Removed session $id")
+    }
+
+    fun terminateAll() {
+        Log.i(TAG, "Terminating all - delegate to SessionManager + legacy")
+        SessionManager.terminateAll()
+        legacySessions.values.forEach { it.destroy() }
+        legacySessions.clear()
+    }
+
+    fun forEach(action: (TerminalSession) -> Unit) {
+        SessionManager.getAllSessions().forEach { action(it.terminalEmulator) }
+        // also legacy not in new manager
+        legacySessions.values.forEach { ls ->
+            if (SessionManager.getSession(ls.getSessionId()) == null) action(ls)
+        }
+    }
+}
