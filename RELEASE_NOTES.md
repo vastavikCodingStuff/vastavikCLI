@@ -1,9 +1,9 @@
-﻿## What's Changed in v2.1.0
-- 🚀 **New Features**: Automated GitHub Release In-App Updater — on launch queries `GET /repos/vastavikCodingStuff/vastavikCLI/releases/latest`, compares `v` stripped semver, shows vibrant green pill `#22C55E` with `⬇ v<LATEST>` in top bar next to drawer/exit, tap opens Update Dialog (Current vs New + Release Notes), **Update Now** finds `*arm64*.apk` asset, streams via `HttpURLConnection` to `getExternalFilesDir(DOWNLOADS)` with live progress, installs via `FileProvider` + `Intent.ACTION_VIEW` (`application/vnd.android.package-archive`).
-- 🛠️ **Improvements**: `UpdateManager` `StateFlow<UpdateState>` (Idle/Checking/UpdateAvailable/Downloading/Downloaded/Error) with `followRedirects` + `VASTAVIK-CLI-Agent/2.0`, `DualDrawerTopBar` LaunchedEffect check, `UpdateDialog` with Current/New cards and progress bar, `AndroidManifest` `REQUEST_INSTALL_PACKAGES` + `FileProvider` (`@xml/file_provider_paths` for downloads/external/files/cache).
-- 🐛 **Bug Fixes**: Fix `BuildConfig` unresolved (use `packageManager.getPackageInfo`), fix `Icons.Filled.Download` missing (use Text ⬇), fix `clip`/`RoundedCornerShape` imports.
+﻿## What's Changed in v2.1.1
+- 🚀 **New Features**: No new major features — patch consolidates VASTAVIK CLI v2.0 rebrand and updater.
+- 🛠️ **Improvements**: Interactive terminal now correctly shows `VASTAVIK CLI v2.0 (ARM64 Subsystem)` prompt with `PS1`/`TERM`/`SHELL` and `-i -l` login, window dims via `resizePty`; `ProotManager` self-heals `$FILES_DIR/bin/proot` with chmod 755.
+- 🐛 **Bug Fixes**: Fix **soft keyboard not showing** (FocusRequester + hidden BasicTextField IME, Box clickable, LaunchedEffect auto-focus, LazyColumn focus), fix **shell prompt missing** (Alpine `/bin/sh` now gets `PS1`, Debian `PS1` ensured, PTY allocated with `isatty` true), fix **error=2 No such file or directory** for `proot` launch (host cwd now `context.filesDir` not `distros/.../root`, guest `/root`/`/tmp`/`dev/shm` mkdirs, shell fallback `bash→sh`), fix **Extra Keys Bar** direct pipe verified, fix **APK not installed** (release now signed v2).
 
 ### Architecture & Compatibility
 - **Target**: Android ARM64-v8a (64-bit only)
 - **Subsystem**: Minimal Debian ARM64 rootfs with `apt`
-- **Commit SHA**: 736a559a0f1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0  <!-- will be replaced with actual HEAD SHA before release -->
+- **Commit SHA**: ebcb958e570108c595a3da7624d5dd5ff71a3f0f
