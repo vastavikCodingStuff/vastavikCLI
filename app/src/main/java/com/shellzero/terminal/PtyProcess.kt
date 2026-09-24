@@ -87,9 +87,11 @@ class PtyProcess private constructor(
             // Important: proot needs unbuffered
             val proc = pb.start()
             val pidFallback = try {
-                proc.pid().toInt()
+                // Use reflection for pid() to avoid compile-time unresolved reference on Android
+                val method = proc.javaClass.getMethod("pid")
+                (method.invoke(proc) as Long).toInt()
             } catch (_: Exception) {
-                // Reflection fallback for older API
+                // Reflection fallback for older API field
                 try {
                     val field = proc.javaClass.getDeclaredField("pid")
                     field.isAccessible = true
