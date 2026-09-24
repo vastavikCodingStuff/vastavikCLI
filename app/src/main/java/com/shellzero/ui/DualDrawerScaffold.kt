@@ -9,8 +9,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -236,6 +238,27 @@ private fun DualDrawerTopBar(
     onRightToggle: () -> Unit
 ) {
     val context = LocalContext.current
+    val updateState by com.shellzero.updater.UpdateManager.state.collectAsState()
+    var showUpdateDialog by remember { mutableStateOf(false) }
+
+    // Auto-check on launch per spec
+    LaunchedEffect(Unit) {
+        try { com.shellzero.updater.UpdateManager.checkForUpdate(context) } catch (_: Exception) {}
+    }
+
+    if (showUpdateDialog && updateState is com.shellzero.updater.UpdateState.UpdateAvailable) {
+        val s = updateState as com.shellzero.updater.UpdateState.UpdateAvailable
+        com.shellzero.ui.UpdateDialog(
+            latestVersion = s.latestVersion,
+            currentVersion = s.currentVersion,
+            releaseNotes = s.releaseNotes,
+            downloadUrl = s.downloadUrl,
+            apkName = s.apkName,
+            onDismiss = { showUpdateDialog = false; com.shellzero.updater.UpdateManager.reset() },
+            onUpdateNow = { showUpdateDialog = false }
+        )
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -257,6 +280,36 @@ private fun DualDrawerTopBar(
             Box(modifier = Modifier.size(6.dp).background(Color(0xFF22C55E)))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Green update pill per spec: vibrant #22C55E, Download icon, v<LATEST>
+            if (updateState is com.shellzero.updater.UpdateState.UpdateAvailable) {
+                val s = updateState as com.shellzero.updater.UpdateState.UpdateAvailable
+                val pillVersion = s.latestVersion // already includes v
+                Box(
+                    modifier = Modifier
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                        .background(Color(0xFF22C55E))
+                        .clickable { showUpdateDialog = true }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "⬇",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                        )
+                        // Use Text with download arrow fallback
+                        Text(
+                            text = if (pillVersion.startsWith("v")) pillVersion else "v$pillVersion",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                        )
+                    }
+                }
+            }
             IconButton(onClick = onRightToggle, modifier = Modifier.size(36.dp)) {
                 Text("⬢", color = Color(0xFF38BDF8), fontSize = 16.sp)
             }
