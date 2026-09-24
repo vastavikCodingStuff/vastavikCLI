@@ -11,8 +11,8 @@ android {
         applicationId = "com.shellzero"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
 
         // Only arm64-v8a per spec (strictly no x86)
         ndk {
@@ -20,8 +20,23 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            // Use debug keystore for now to ensure installable APK.
+            // For production, replace with a dedicated release keystore:
+            // storeFile = file("release.keystore")
+            storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+            isV1SigningEnabled = true
+            isV2SigningEnabled = true
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
