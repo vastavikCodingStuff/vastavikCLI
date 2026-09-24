@@ -1,5 +1,7 @@
 package com.shellzero.ui
 
+import android.app.Activity
+import android.content.Intent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -7,20 +9,24 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.shellzero.service.TerminalSessionService
 import kotlinx.coroutines.launch
 
 /**
- * ShellZero - Dual-Sided Gesture Navigation
+ * VASTAVIK CLI - Dual-Sided Gesture Navigation
  * Spec §1 + §4 deliverable #1
  *
  * Implements simultaneous Left (Session Manager) and Right (ARM64 Distro Hub) drawers
@@ -188,7 +194,7 @@ fun DualDrawerScaffold(
  * the actual terminal content with top bar toggle icons.
  */
 @Composable
-fun ShellZeroDualDrawerScaffold(
+fun VastavikDualDrawerScaffold(
     leftDrawerState: DrawerState = rememberDrawerState(initialValue = DrawerValue.Closed),
     rightOpen: MutableState<Boolean> = remember { mutableStateOf(false) },
     onKeyboardToggle: () -> Unit = {},
@@ -229,6 +235,7 @@ private fun DualDrawerTopBar(
     onLeftToggle: () -> Unit,
     onRightToggle: () -> Unit
 ) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -242,15 +249,33 @@ private fun DualDrawerTopBar(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "ShellZero",
+                text = "VASTAVIK CLI",
                 color = Color(0xFFE2E8F0),
                 fontSize = 13.sp,
                 fontFamily = FontFamily.Monospace
             )
             Box(modifier = Modifier.size(6.dp).background(Color(0xFF22C55E)))
         }
-        IconButton(onClick = onRightToggle, modifier = Modifier.size(36.dp)) {
-            Text("⬢", color = Color(0xFF38BDF8), fontSize = 16.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onRightToggle, modifier = Modifier.size(36.dp)) {
+                Text("⬢", color = Color(0xFF38BDF8), fontSize = 16.sp)
+            }
+            IconButton(
+                onClick = {
+                    val exitIntent = Intent(context, TerminalSessionService::class.java).apply {
+                        action = TerminalSessionService.ACTION_EXIT
+                    }
+                    context.startService(exitIntent)
+                    (context as? Activity)?.finishAffinity()
+                },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Exit",
+                    tint = Color.Red
+                )
+            }
         }
     }
 }

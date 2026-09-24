@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VASTAVIK CLI</string>
+    <string name="channel_name">VASTAVIK CLI Session Service</string>
+    <string name="channel_description">Persistent VASTAVIK CLI terminal sessions</string>
+    <string name="notification_title">VASTAVIK CLI</string>
+    <string name="notification_text">VASTAVIK CLI (1 session active)</string>
+    <string name="cli_header">VASTAVIK CLI v2.0 (ARM64 Subsystem)</string>
+</resources>

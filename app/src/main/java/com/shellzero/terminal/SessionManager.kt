@@ -15,7 +15,7 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /**
- * ShellZero - Multi-Session Engine Architecture
+ * VASTAVIK CLI - Multi-Session Engine Architecture
  * Spec §2: maintains synchronized list of TerminalSession instances,
  * supports adding, switching without terminating background, graceful close on `exit 0`.
  *
@@ -29,22 +29,28 @@ typealias TerminalEmulator = TerminalSession
 
 /**
  * Spec exact data class + extended fields for distro isolation.
- * `distroId` is the folder name under $FILES_DIR/distros/<id> or legacy "debian".
- * `distroName` is the display name (e.g., "Debian", "Ubuntu").
+ * Fixes "Kali Launches Debian" bug: stores active rootfsPath dynamically.
+ * VASTAVIK CLI requires SessionState to route to $FILES_DIR/distros/<distroId>.
  */
 data class SessionState(
     val id: String,
     val index: Int,
-    var customName: String,
-    val distroName: String,
+    var name: String,
     val distroId: String,
+    val rootfsPath: String,
     val ptyProcess: PtyProcess?,
-    val terminalEmulator: TerminalEmulator,
+    val terminalView: TerminalEmulator,
+    val distroName: String = distroId,
     val createdAt: Long = System.currentTimeMillis()
 ) {
+    // Backward-compat aliases
+    var customName: String
+        get() = name
+        set(value) { name = value }
+    val terminalEmulator: TerminalEmulator get() = terminalView
     // Convenience: exposes the underlying TerminalSession directly
-    val session: TerminalSession get() = terminalEmulator
-    val displayName: String get() = customName.ifBlank { "$distroName (sh)" }
+    val session: TerminalSession get() = terminalView
+    val displayName: String get() = name.ifBlank { "$distroName (sh)" }
 }
 
 object SessionManager {
@@ -72,17 +78,22 @@ object SessionManager {
 
     /**
      * Create a new PTY shell session isolated inside distro's rootfs via PRoot.
+     * Fixes "Kali Launches Debian" bug: uses dynamic rootfsDirectory, not hardcoded debian.
      * Does NOT terminate existing sessions; switches active canvas to new one.
      *
      * @param distroId  folder under $FILES_DIR/distros/<id> or "debian" for legacy
      * @param distroName display name
-     * @param customName optional custom name, defaults to "$distroName (sh)" or "Session N"
+     * @param rootfsDirectory explicit absolute path to distro root (e.g., $FILES_DIR/distros/kali) — if null, resolved via distroId
+     * @param shellPath shell to launch inside PRoot (e.g., "/bin/bash" or "/bin/sh" for Alpine)
+     * @param customName optional custom name, defaults to "$distroName (sh)"
      */
     fun createSession(
         context: Context,
         distroId: String = "debian",
         distroName: String = "Debian",
         customName: String? = null,
+        rootfsDirectory: String? = null,
+        shellPath: String = "/bin/bash",
         rows: Int = 24,
         cols: Int = 80,
         startImmediately: Boolean = true
@@ -92,30 +103,31 @@ object SessionManager {
         val index = indexCounter.incrementAndGet()
         val name = customName?.takeIf { it.isNotBlank() } ?: "$distroName (sh)"
 
-        // Resolve rootfs path: check new isolated path first, then legacy `debian`
-        val rootfsDir = resolveDistroRoot(context, distroId)
+        // Resolve rootfs path: use explicit rootfsDirectory if provided (spec fix), else resolve via distroId
+        val rootfsDir = rootfsDirectory?.let { File(it) } ?: resolveDistroRoot(context, distroId)
+        val rootfsPath = rootfsDir.absolutePath
 
-        // Create TerminalSession that will spawn PRoot with that rootfs
-        // We extend TerminalSession to support arbitrary rootfs via Distro-specific constructor
+        // Create TerminalSession that will spawn PRoot with that rootfs and shell
         val terminalSession = TerminalSession(
             context = context.applicationContext,
             sessionId = id,
             initialRows = rows,
             initialCols = cols,
             distroId = distroId,
-            distroRoot = rootfsDir
+            distroRoot = rootfsDir,
+            shellPath = shellPath
         )
 
         // Pre-create PtyProcess placeholder; actual process is inside TerminalSession.start()
-        // For SessionState we expose ptyProcess lazily after start
         val state = SessionState(
             id = id,
             index = index,
-            customName = name,
-            distroName = distroName,
+            name = name,
             distroId = distroId,
+            rootfsPath = rootfsPath,
             ptyProcess = null, // will be populated after start via session.ptyProcess
-            terminalEmulator = terminalSession
+            terminalView = terminalSession,
+            distroName = distroName
         )
 
         // Attach exit listener: when shell exits `exit 0`, gracefully close session
@@ -146,6 +158,49 @@ object SessionManager {
         updateNotificationBadge(context)
 
         state
+    }
+
+    /**
+     * Spec-compliant: create new session with explicit rootfsDirectory and shellPath.
+     * Used by Distro Center "Launch Session" to ensure Kali doesn't launch Debian.
+     */
+    fun createNewSession(
+        context: Context,
+        distroName: String,
+        distroId: String,
+        rootfsDirectory: String,
+        shellPath: String = "/bin/bash"
+    ): SessionState = createSession(
+        context = context,
+        distroId = distroId,
+        distroName = distroName,
+        rootfsDirectory = rootfsDirectory,
+        shellPath = shellPath
+    )
+
+    /**
+     * Helper for Distro Center drawer: validates extraction then spawns.
+     * Mirrors spec's launchDistroSession.
+     */
+    fun launchDistroSession(
+        context: Context,
+        distroId: String,
+        distroName: String,
+        rootfsDirectory: String,
+        shellPath: String = "/bin/bash",
+        onNotExtracted: (() -> Unit)? = null
+    ): SessionState? {
+        val distroRootfs = File(rootfsDirectory)
+        if (!distroRootfs.exists() || !File(distroRootfs, "bin").exists()) {
+            Log.w(TAG, "$distroName is not extracted yet at $rootfsDirectory")
+            onNotExtracted?.invoke()
+            // Fallback toast if context is Activity
+            try {
+                android.widget.Toast.makeText(context, "$distroName is not extracted yet.", android.widget.Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) {}
+            return null
+        }
+        return createNewSession(context, distroName, distroId, rootfsDirectory, shellPath)
     }
 
     /**
@@ -188,8 +243,8 @@ object SessionManager {
         if (idx == -1) return false
         val trimmed = newName.trim().ifBlank { return false }
         val old = _sessions.value[idx]
-        val updatedState = old.copy(customName = trimmed)
-        // Preserve object identity for terminalEmulator/ptyProcess; copy keeps them
+        val updatedState = old.copy(name = trimmed)
+        // Preserve object identity for terminalView/ptyProcess; copy keeps them
         val mutable = _sessions.value.toMutableList()
         mutable[idx] = updatedState
         _sessions.value = mutable
@@ -203,13 +258,17 @@ object SessionManager {
 
     /**
      * Gracefully close session: destroy PTY, remove from list, switch active if needed.
+     * Spec fix: sync with TerminalSessionService immediately.
      */
     fun closeSession(id: String): Boolean = lock.withLock {
         val target = _sessions.value.find { it.id == id } ?: return false
         try {
-            target.terminalEmulator.destroy()
+            // Spec: kill child PRoot process forcibly
+            target.ptyProcess?.destroyForcibly()
+            target.terminalView.destroy()
         } catch (e: Exception) {
             Log.w(TAG, "destroy failed for $id", e)
+            try { target.terminalView.destroy() } catch (_: Exception) {}
         }
         val remaining = _sessions.value.filterNot { it.id == id }
         _sessions.value = remaining
@@ -218,9 +277,33 @@ object SessionManager {
             _activeSession.value = remaining.lastOrNull() // most recent remaining
         }
         Log.i(TAG, "Closed session $id remaining=${remaining.size}")
-        // Caller should provide context to update notification; we try via active session's context if possible
-        // For now, no-op (service polls sessionCount)
+        // Spec fix: sync count with foreground service immediately
+        try {
+            com.shellzero.service.TerminalSessionService.instance?.updateNotification(remaining.size)
+            if (remaining.isEmpty()) {
+                com.shellzero.service.TerminalSessionService.instance?.stopSelfWithCleanup()
+            }
+        } catch (e: Exception) { Log.w(TAG, "notify service failed", e) }
+        // Fallback intent-based badge update
+        try {
+            // Use last known context if available via remaining session? No-op if no context
+        } catch (_: Exception) {}
         true
+    }
+
+    /**
+     * Spec-mandated removeSession: direct alias for closeSession with extra handling.
+     * Called from left drawer long-press.
+     */
+    fun removeSession(sessionId: String) {
+        val session = _sessions.value.find { it.id == sessionId }
+        session?.ptyProcess?.destroyForcibly()
+        closeSession(sessionId)
+        // If the active session was deleted, switch to the nearest available session (handled in closeSession)
+        // Sync count already handled in closeSession
+        if (_sessions.value.isEmpty()) {
+            try { com.shellzero.service.TerminalSessionService.instance?.stopSelfWithCleanup() } catch (_: Exception) {}
+        }
     }
 
     /**
@@ -230,6 +313,9 @@ object SessionManager {
         Log.i(TAG, "Kill requested for $id")
         return closeSession(id)
     }
+
+    /** Spec alias for destroyAllSessions */
+    fun destroyAllSessions() = terminateAll()
 
     /**
      * Terminate all sessions (called by TerminalSessionService on Exit action).

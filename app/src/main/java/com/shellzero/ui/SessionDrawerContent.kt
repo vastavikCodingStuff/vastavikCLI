@@ -79,7 +79,7 @@ fun SessionDrawerContent(
             ) {
                 Column {
                     Text(
-                        text = "ShellZero",
+                        text = "VASTAVIK CLI",
                         color = TextPrimary,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
@@ -247,7 +247,7 @@ fun SessionDrawerContent(
 
     // ── Rename Dialog ──
     renameTarget?.let { target ->
-        var newName by remember(target.id) { mutableStateOf(target.customName) }
+        var newName by remember(target.id) { mutableStateOf(target.name) }
         AlertDialog(
             onDismissRequest = { renameTarget = null },
             containerColor = CardBg,
@@ -298,7 +298,7 @@ fun SessionDrawerContent(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (newName.isNotBlank() && newName != target.customName) {
+                        if (newName.isNotBlank() && newName != target.name) {
                             SessionManager.renameSession(target.id, newName)
                         }
                         renameTarget = null
@@ -333,7 +333,8 @@ fun SessionDrawerContent(
             confirmButton = {
                 Button(
                     onClick = {
-                        SessionManager.killSession(target.id)
+                        // Spec fix: use removeSession which destroys PTY forcibly and syncs notification
+                        SessionManager.removeSession(target.id)
                         killTarget = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444), contentColor = Color.White)

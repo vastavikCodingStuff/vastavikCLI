@@ -12,7 +12,7 @@ import com.shellzero.terminal.TerminalSession
 import com.shellzero.terminal.TerminalSessionManager
 
 /**
- * ShellZero - Unkillable Foreground Service
+ * VASTAVIK CLI - Unkillable Foreground Service
  * Termux lifecycle model: START_STICKY + onTaskRemoved() no-op + WakeLock
  *
  * Manifest must declare: android:foregroundServiceType="specialUse"
@@ -21,13 +21,19 @@ class TerminalSessionService : Service() {
 
     companion object {
         const val CHANNEL_ID = "terminal_session_channel"
-        const val CHANNEL_NAME = "ShellZero Terminal"
+        const val CHANNEL_NAME = "VASTAVIK CLI Session Service"
         const val NOTIFICATION_ID = 1001
 
-        const val ACTION_EXIT = "com.shellzero.action.EXIT"
-        const val ACTION_TOGGLE_WAKELOCK = "com.shellzero.action.TOGGLE_WAKELOCK"
-        const val ACTION_START = "com.shellzero.action.START_SERVICE"
+        // Spec mandates com.vastavik.cli.ACTION_EXIT, keep legacy com.shellzero for compat
+        const val ACTION_EXIT = "com.vastavik.cli.ACTION_EXIT"
+        const val ACTION_EXIT_LEGACY = "com.shellzero.action.EXIT"
+        const val ACTION_TOGGLE_WAKELOCK = "com.vastavik.cli.ACTION_TOGGLE_WAKELOCK"
+        const val ACTION_TOGGLE_WAKELOCK_LEGACY = "com.shellzero.action.TOGGLE_WAKELOCK"
+        const val ACTION_START = "com.vastavik.cli.ACTION_START"
+        const val ACTION_START_LEGACY = "com.shellzero.action.START_SERVICE"
         const val ACTION_UPDATE_BADGE = "com.shellzero.action.UPDATE_BADGE"
+        var instance: TerminalSessionService? = null
+            private set
 
         fun start(context: Context) {
             val intent = Intent(context, TerminalSessionService::class.java).apply {
@@ -54,17 +60,18 @@ class TerminalSessionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createNotificationChannel()
         acquireWakeLockIfNeeded(initial = false) // start without wakelock, user toggles
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_EXIT -> {
-                handleExit()
+            ACTION_EXIT, ACTION_EXIT_LEGACY -> {
+                stopSelfWithCleanup()
                 return START_NOT_STICKY
             }
-            ACTION_TOGGLE_WAKELOCK -> {
+            ACTION_TOGGLE_WAKELOCK, ACTION_TOGGLE_WAKELOCK_LEGACY -> {
                 toggleWakeLock()
                 // refresh notification to reflect new state
                 updateNotification()
@@ -74,7 +81,7 @@ class TerminalSessionService : Service() {
                 updateNotification()
                 return START_STICKY
             }
-            ACTION_START, null -> {
+            ACTION_START, ACTION_START_LEGACY, null -> {
                 // Normal start
                 startForeground(NOTIFICATION_ID, buildNotification())
             }
@@ -123,11 +130,17 @@ class TerminalSessionService : Service() {
         TerminalSessionManager.terminateAll()
         // Remove notification
         try {
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
         } catch (_: Exception) {
             @Suppress("DEPRECATION")
-            stopForeground(true)
+            try { stopForeground(true) } catch (_: Exception) {}
         }
+        instance = null
         super.onDestroy()
     }
 
@@ -142,7 +155,7 @@ class TerminalSessionService : Service() {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
-                "ShellZero::TerminalWakeLock"
+                "VASTAVIK CLI::TerminalWakeLock"
             ).apply {
                 setReferenceCounted(false)
             }
@@ -177,14 +190,84 @@ class TerminalSessionService : Service() {
     }
 
     private fun handleExit() {
-        // Terminate all PRoot child processes gracefully
-        SessionManager.terminateAll()
+        stopSelfWithCleanup()
+    }
+
+    /**
+     * Spec-mandated complete cleanup for Exit action.
+     * Kills PTYs, releases wake lock, removes notification, kills process.
+     */
+    fun stopSelfWithCleanup() {
+        try {
+            SessionManager.destroyAllSessions()
+        } catch (_: Exception) { SessionManager.terminateAll() }
+        try { SessionManager.terminateAll() } catch (_: Exception) {}
         TerminalSessionManager.terminateAll()
-        releaseWakeLock()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        if (wakeLock?.isHeld == true) {
+            try { wakeLock?.release() } catch (_: Exception) {}
+        }
+        isWakeLockHeld = false
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Exception) {
+            @Suppress("DEPRECATION")
+            try { stopForeground(true) } catch (_: Exception) {}
+        }
         stopSelf()
-        // Kill process tree if needed
-        // android.os.Process.killProcess(android.os.Process.myPid()) // optional
+        instance = null
+        try { android.os.Process.killProcess(android.os.Process.myPid()) } catch (_: Exception) {}
+    }
+
+    /**
+     * Spec-mandated live sync: called by SessionManager when sessions change.
+     * If count <=0, cleanly exit service.
+     */
+    fun updateNotification(sessionCount: Int) {
+        if (sessionCount <= 0) {
+            stopSelfWithCleanup()
+            return
+        }
+        try {
+            val notification = buildNotification(sessionCount)
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            // Fallback to generic update
+            try { updateNotification() } catch (_: Exception) {}
+        }
+    }
+
+    // Overload to build with explicit count (used by updateNotification(count))
+    private fun buildNotification(sessionCount: Int): Notification {
+        val contentText = "VASTAVIK CLI ($sessionCount session${if (sessionCount > 1) "s" else ""} active)"
+        val contentIntent = packageManager.getLaunchIntentForPackage(packageName)?.let {
+            PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        }
+        val exitIntent = Intent(this, TerminalSessionService::class.java).apply { action = ACTION_EXIT }
+        val exitPending = PendingIntent.getService(this, 101, exitIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val toggleIntent = Intent(this, TerminalSessionService::class.java).apply { action = ACTION_TOGGLE_WAKELOCK }
+        val togglePending = PendingIntent.getService(this, 2, toggleIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val wakeLockLabel = if (isWakeLockHeld) "Release Wake Lock" else "Acquire Wake Lock"
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("VASTAVIK CLI")
+            .setContentText(contentText)
+            .setSmallIcon(android.R.drawable.ic_menu_more)
+            .setOngoing(true)
+            .setShowWhen(false)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setContentIntent(contentIntent)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .addAction(NotificationCompat.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "Exit", exitPending).build())
+            .addAction(NotificationCompat.Action.Builder(if (isWakeLockHeld) android.R.drawable.ic_lock_idle_lock else android.R.drawable.ic_lock_idle_alarm, wakeLockLabel, togglePending).build())
+            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+            .build()
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -198,7 +281,7 @@ class TerminalSessionService : Service() {
                 CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_LOW // non-intrusive, persistent
             ).apply {
-                description = "Persistent ShellZero terminal sessions"
+                description = "Persistent VASTAVIK CLI terminal sessions"
                 setShowBadge(false)
                 enableLights(false)
                 enableVibration(false)
@@ -214,8 +297,8 @@ class TerminalSessionService : Service() {
         val newCount = SessionManager.sessionCount
         val legacyCount = TerminalSessionManager.sessionCount
         val sessionCount = maxOf(newCount, legacyCount)
-        val contentText = if (sessionCount == 0) "ShellZero (1 session active)"
-        else "ShellZero ($sessionCount session${if (sessionCount > 1) "s" else ""} active)"
+        val contentText = if (sessionCount == 0) "VASTAVIK CLI (1 session active)"
+        else "VASTAVIK CLI ($sessionCount session${if (sessionCount > 1) "s" else ""} active)"
 
         val contentIntent = packageManager.getLaunchIntentForPackage(packageName)?.let {
             PendingIntent.getActivity(
@@ -239,7 +322,7 @@ class TerminalSessionService : Service() {
         val wakeLockLabel = if (isWakeLockHeld) "Release Wake Lock" else "Acquire Wake Lock"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("ShellZero")
+            .setContentTitle("VASTAVIK CLI")
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_menu_more) // Replace with R.drawable.ic_terminal
             .setOngoing(true)

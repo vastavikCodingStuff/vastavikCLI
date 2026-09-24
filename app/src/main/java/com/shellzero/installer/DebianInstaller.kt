@@ -12,7 +12,7 @@ import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import java.io.*
 
 /**
- * ShellZero Debian ARM64 Installer
+ * VASTAVIK CLI Debian ARM64 Installer
  *
  * - Handles asset extraction of statically compiled ARM64 proot
  *   from assets/bin/arm64-v8a/proot
@@ -178,7 +178,7 @@ object DebianInstaller {
         } catch (_: Exception) {}
 
         val dns = """
-            # ShellZero auto-generated resolv.conf
+            # VASTAVIK CLI auto-generated resolv.conf
             nameserver 1.1.1.1
             nameserver 8.8.8.8
             nameserver 9.9.9.9

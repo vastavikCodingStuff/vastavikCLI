@@ -1,4 +1,4 @@
-# VastavikCLI — ShellZero
+# VastavikCLI — VASTAVIK CLI
 
 > **Standalone Native Android Terminal (ARM64) with Embedded Debian + PRoot — Unkillable, Termux-style, Multi-Session & ARM64 Distro Hub.**
 
@@ -7,7 +7,7 @@
 [![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-4285F4)](https://developer.android.com/jetpack/compose)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
 
-This repository implements **ShellZero**, a high-performance Android terminal emulator in **Kotlin + Jetpack Compose** targeting **exclusively `arm64-v8a` (`aarch64`)** with an embedded minimal **Debian ARM64** subsystem, **PRoot** rootless execution, **unkillable foreground service**, **Termux-style Extra Keys**, **dual-drawer navigation**, **persistent multi-session engine**, and a dedicated **ARM64 Distro Hub** for 6 isolated Linux distributions.
+This repository implements **VASTAVIK CLI**, a high-performance Android terminal emulator in **Kotlin + Jetpack Compose** targeting **exclusively `arm64-v8a` (`aarch64`)** with an embedded minimal **Debian ARM64** subsystem, **PRoot** rootless execution, **unkillable foreground service**, **Termux-style Extra Keys**, **dual-drawer navigation**, **persistent multi-session engine**, and a dedicated **ARM64 Distro Hub** for 6 isolated Linux distributions.
 
 ---
 
@@ -24,7 +24,7 @@ App (Kotlin + Jetpack Compose, arm64-v8a only)
  ├─ distro/DistroDownloader.kt + DistroCatalog   → streaming HTTP → $FILES_DIR/downloads/ → distros/<id>/, XZ/Gz, SHA, resolv.conf
  ├─ installer/DebianInstaller.kt                 → extracts assets/bin/arm64-v8a/proot + debian-rootfs-arm64.tar.xz → $FILES_DIR/debian
  ├─ service/TerminalSessionService.kt            → START_STICKY, onTaskRemoved() resilient, PARTIAL_WAKE_LOCK, terminal_session_channel
- └─ cpp/pty.cpp (libshellzero-pty.so)            → native PTY, ioctl(TIOCSWINSZ), SIGWINCH
+ └─ cpp/pty.cpp (libVASTAVIK CLI-pty.so)            → native PTY, ioctl(TIOCSWINSZ), SIGWINCH
       └─ PRoot: $FILES_DIR/bin/proot -r $FILES_DIR/distros/<id> -0 -b /dev -b /proc ... /bin/bash --login
            └─ apt/dpkg works (resolv.conf 1.1.1.1/8.8.8.8 pre-seeded)
 ```
@@ -46,7 +46,7 @@ App (Kotlin + Jetpack Compose, arm64-v8a only)
 ### 2. Unkillable Foreground Service (Termux Lifecycle Model)
 - `TerminalSessionService.kt` as persistent high-priority `ForegroundService` with `START_STICKY` and `onTaskRemoved()` that **does NOT kill** the session when swiped from recents (re-launches via `startForegroundService`).
 - Holds `PowerManager.PARTIAL_WAKE_LOCK` (10h timeout safety, toggleable) to prevent deep sleep.
-- Ongoing notification `terminal_session_channel` (`IMPORTANCE_LOW`, persistent): `ShellZero (N sessions active)` with **Exit** (terminates all PTYs + service) and **Acquire/Release Wake Lock** dynamic toggle. Badge updates via `SessionManager.sessionCount` + `ACTION_UPDATE_BADGE`.
+- Ongoing notification `terminal_session_channel` (`IMPORTANCE_LOW`, persistent): `VASTAVIK CLI (N sessions active)` with **Exit** (terminates all PTYs + service) and **Acquire/Release Wake Lock** dynamic toggle. Badge updates via `SessionManager.sessionCount` + `ACTION_UPDATE_BADGE`.
 
 ### 3. Termux-Style Extra Keys Bar (Virtual Toolbar)
 - **Pinned above soft keyboard** (`Modifier.imePadding()` + `navigationBars`), stays at bottom when keyboard hidden.
@@ -55,7 +55,7 @@ App (Kotlin + Jetpack Compose, arm64-v8a only)
 - **Sticky modifiers:** `CTRL`/`ALT` latch with neon badge + dot; next key sends control byte (`CTRL+C` → `\u0003`, `CTRL+D` → `\u0004`, etc.), arrows emit `\u001b[A`…`[D`, `ESC` → `\u001b`.
 
 ### 4. Dual-Sided Gesture Navigation (Left & Right Drawers)
-- **Left Drawer (Session Manager, swipe L→R or ☰):** obsidian `#0B1120` surface, `#1E293B` dividers, header `ShellZero` + active count + `KEYBOARD` toggle, numbered sessions (`1,2,3…`) with custom names (`Debian (sh)` default), neon cyan/green active border, long-press → **Rename Session** / **Kill Session** dialogs, footer `[+] NEW SESSION` spawns independent PTY and switches canvas.
+- **Left Drawer (Session Manager, swipe L→R or ☰):** obsidian `#0B1120` surface, `#1E293B` dividers, header `VASTAVIK CLI` + active count + `KEYBOARD` toggle, numbered sessions (`1,2,3…`) with custom names (`Debian (sh)` default), neon cyan/green active border, long-press → **Rename Session** / **Kill Session** dialogs, footer `[+] NEW SESSION` spawns independent PTY and switches canvas.
 - **Right Drawer (ARM64 Distro Hub, swipe R→L or ⬢):** title `ARM64 Distro Center`, 6 isolated distros in `$FILES_DIR/distros/<name>` (shared `bin/proot`), cards show badge/version/size/status (`Installed`/`Not Installed`/`Downloading XX%`), actions `Download & Install` (streaming HTTP → `downloads/` with progress) → `Extract` → `Launch Session` (PRoot isolated) → `Delete`. Edge indicators + scrim tap-to-close; implemented via `ModalNavigationDrawer` (left) + custom swipeable surface (right) in `DualDrawerScaffold.kt`.
 
 ### 5. Multi-Session Engine Architecture (`SessionManager.kt`)
@@ -90,17 +90,17 @@ data class SessionState(
 
 | Spec File | Actual Path | Notes |
 |---|---|---|
-| `TerminalSessionService.kt` | `app/src/main/java/com/shellzero/service/TerminalSessionService.kt` | `START_STICKY`, `onTaskRemoved`, WakeLock, `terminal_session_channel` |
-| `DebianInstaller.kt` | `app/src/main/java/com/shellzero/installer/DebianInstaller.kt` | asset extract, `resolv.conf`, `chmod` |
-| `TerminalSession.kt` & `PtyProcess.kt` | `app/src/main/java/com/shellzero/terminal/` | distro-aware `TerminalSession(distroId,distroRoot)`, JNI PTY |
-| `TerminalScreen.kt` | `app/src/main/java/com/shellzero/ui/TerminalScreen.kt` | Compose canvas, `TerminalViewModel`, `ExtraKeysBar` |
+| `TerminalSessionService.kt` | `app/src/main/java/com/VASTAVIK CLI/service/TerminalSessionService.kt` | `START_STICKY`, `onTaskRemoved`, WakeLock, `terminal_session_channel` |
+| `DebianInstaller.kt` | `app/src/main/java/com/VASTAVIK CLI/installer/DebianInstaller.kt` | asset extract, `resolv.conf`, `chmod` |
+| `TerminalSession.kt` & `PtyProcess.kt` | `app/src/main/java/com/VASTAVIK CLI/terminal/` | distro-aware `TerminalSession(distroId,distroRoot)`, JNI PTY |
+| `TerminalScreen.kt` | `app/src/main/java/com/VASTAVIK CLI/ui/TerminalScreen.kt` | Compose canvas, `TerminalViewModel`, `ExtraKeysBar` |
 | `AndroidManifest.xml` additions | `app/src/main/AndroidManifest.xml` | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `WAKE_LOCK`, `POST_NOTIFICATIONS` |
-| `DualDrawerScaffold.kt` | `app/src/main/java/com/shellzero/ui/DualDrawerScaffold.kt` | left `ModalNavigationDrawer` + right custom swipeable |
-| `SessionDrawerContent.kt` | `app/src/main/java/com/shellzero/ui/SessionDrawerContent.kt` | left drawer UI, rename/kill, `[+] NEW SESSION` |
-| `DistroHubDrawerContent.kt` | `app/src/main/java/com/shellzero/ui/DistroHubDrawerContent.kt` | right drawer, 6 cards, progress, launch/delete |
-| `SessionManager.kt` | `app/src/main/java/com/shellzero/terminal/SessionManager.kt` | `SessionState`, synchronized flows |
-| `DistroDownloader.kt` | `app/src/main/java/com/shellzero/distro/DistroDownloader.kt` | catalog, download/extract/launch |
-| `MainActivity.kt` | `app/src/main/java/com/shellzero/MainActivity.kt` | permission, `DebianInstaller`, `SessionManager`, `ShellZeroApp` |
+| `DualDrawerScaffold.kt` | `app/src/main/java/com/VASTAVIK CLI/ui/DualDrawerScaffold.kt` | left `ModalNavigationDrawer` + right custom swipeable |
+| `SessionDrawerContent.kt` | `app/src/main/java/com/VASTAVIK CLI/ui/SessionDrawerContent.kt` | left drawer UI, rename/kill, `[+] NEW SESSION` |
+| `DistroHubDrawerContent.kt` | `app/src/main/java/com/VASTAVIK CLI/ui/DistroHubDrawerContent.kt` | right drawer, 6 cards, progress, launch/delete |
+| `SessionManager.kt` | `app/src/main/java/com/VASTAVIK CLI/terminal/SessionManager.kt` | `SessionState`, synchronized flows |
+| `DistroDownloader.kt` | `app/src/main/java/com/VASTAVIK CLI/distro/DistroDownloader.kt` | catalog, download/extract/launch |
+| `MainActivity.kt` | `app/src/main/java/com/VASTAVIK CLI/MainActivity.kt` | permission, `DebianInstaller`, `SessionManager`, `VASTAVIK CLIApp` |
 | Native PTY | `app/src/main/cpp/pty.cpp` + `CMakeLists.txt` | `openpty`, `TIOCSWINSZ`, `SIGWINCH` |
 | Governance | `.agents.md` | Branching, verified commits, PR, squash-merge, release flow |
 | Build | `app/build.gradle.kts` | `abiFilters arm64-v8a`, `versionCode 2`, `versionName 1.1.0` |
@@ -109,7 +109,7 @@ data class SessionState(
 
 ## Quick Start
 
-1. **Prerequisites:** Android Studio Hedgehog+, JDK 17, NDK (for `libshellzero-pty.so`), Android SDK `compileSdk 34`.
+1. **Prerequisites:** Android Studio Hedgehog+, JDK 17, NDK (for `libVASTAVIK CLI-pty.so`), Android SDK `compileSdk 34`.
 2. **Assets (not committed due to size):**
    ```
    app/src/main/assets/bin/arm64-v8a/proot                 # ~1.2 MB static aarch64

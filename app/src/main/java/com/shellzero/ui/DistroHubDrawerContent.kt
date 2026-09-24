@@ -187,7 +187,7 @@ private fun DistroCard(
     val isNotInstalled = status is DistroStatus.NotInstalled || status is DistroStatus.Error
 
     // Colors per distro tag
-    val tagColor = when (distro.tag) {
+    val tagColor = when (distro.id) {
         "debian" -> Color(0xFFD70A53)
         "ubuntu" -> Color(0xFFE95420)
         "kali" -> Color(0xFF268BFF)
@@ -232,7 +232,7 @@ private fun DistroCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = distro.tag.take(2).uppercase(),
+                            text = distro.badge,
                             color = Color.White,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.ExtraBold,
@@ -248,7 +248,7 @@ private fun DistroCard(
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
                             )
-                            if (distro.isDefault) {
+                            if (distro.id == "debian") {
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(4.dp))
@@ -262,14 +262,14 @@ private fun DistroCard(
                         Spacer(Modifier.height(2.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = distro.version,
+                                text = distro.tag,
                                 color = TextMuted,
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace
                             )
                             Text("•", color = TextFaint, fontSize = 10.sp)
                             Text(
-                                text = distro.compressedSize,
+                                text = distro.approxSize,
                                 color = TextFaint,
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace

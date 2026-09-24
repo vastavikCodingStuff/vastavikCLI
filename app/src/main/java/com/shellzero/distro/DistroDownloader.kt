@@ -17,7 +17,7 @@ import java.net.URL
 import java.security.MessageDigest
 
 /**
- * ShellZero - ARM64 Distro Hub: Download, SHA/integrity, and un-tar extraction
+ * VASTAVIK CLI - ARM64 Distro Hub: Download, SHA/integrity, and un-tar extraction
  * Spec §3 + §4 deliverable #5
  *
  * Storage:
@@ -30,87 +30,97 @@ import java.security.MessageDigest
 // Catalog
 // ──────────────────────────────────────────────────────────────────────
 
-data class DistroInfo(
-    val id: String,              // folder name
+/**
+ * Spec-compliant DistroItem per VASTAVIK CLI patch
+ * Fields: id, name, badge, tag, approxSize, description, downloadUrl, archiveExtension, shellPath
+ */
+data class DistroItem(
+    val id: String,
     val name: String,
+    val badge: String,
+    val tag: String,
+    val approxSize: String,
     val description: String,
-    val version: String,
-    val tag: String,             // logo/tag short e.g. "debian", "ubuntu"
-    val compressedSize: String,  // display e.g. "~45MB"
     val downloadUrl: String,
-    val archiveName: String,     // e.g. debian-bookworm-arm64.tar.xz
-    val sha256: String? = null,  // optional integrity hash
-    val isDefault: Boolean = false
+    val archiveExtension: String, // "tar.xz" or "tar.gz"
+    val shellPath: String         // "/bin/bash" or "/bin/sh"
 )
 
+// Legacy alias for backward compatibility — maps to DistroItem
+typealias DistroInfo = DistroItem
+
 object DistroCatalog {
-    val all: List<DistroInfo> = listOf(
-        DistroInfo(
+    // Spec-mandated 5 distros with EXALAB high-speed direct mirrors (301/302 handled)
+    val distros: List<DistroItem> = listOf(
+        DistroItem(
             id = "debian",
             name = "Debian Minimal",
-            description = "Rock-solid, stripped-down Debian Bookworm/Trixie. Recommended default with apt pre-configured.",
-            version = "Trixie / Bookworm",
-            tag = "debian",
-            compressedSize = "~48MB",
-            downloadUrl = "https://github.com/debuerreotype/docker-debian-artifacts/raw/dist-arm64/bookworm/rootfs.tar.xz",
-            archiveName = "debian-rootfs-arm64.tar.xz",
-            isDefault = true
+            badge = "DE",
+            tag = "Bookworm / Minimal",
+            approxSize = "~45MB",
+            description = "Rock-solid, stripped-down Debian Bookworm ARM64 rootfs with pre-configured apt.",
+            downloadUrl = "https://raw.githubusercontent.com/EXALAB/Anlinux-Resources/master/Rootfs/Debian/arm64/debian-rootfs-arm64.tar.xz",
+            archiveExtension = "tar.xz",
+            shellPath = "/bin/bash"
         ),
-        DistroInfo(
+        DistroItem(
             id = "ubuntu",
             name = "Ubuntu Minimal",
-            description = "Official Ubuntu 24.04 LTS minimal ARM64 rootfs. Ideal for familiar apt + snap workflows.",
-            version = "24.04 LTS",
-            tag = "ubuntu",
-            compressedSize = "~52MB",
-            downloadUrl = "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04-base-arm64.tar.gz",
-            archiveName = "ubuntu-base-24.04-arm64.tar.gz"
+            badge = "UB",
+            tag = "24.04 LTS Noble",
+            approxSize = "~50MB",
+            description = "Official Ubuntu minimal ARM64 environment with standard apt tooling.",
+            downloadUrl = "https://raw.githubusercontent.com/EXALAB/Anlinux-Resources/master/Rootfs/Ubuntu/arm64/ubuntu-rootfs-arm64.tar.xz",
+            archiveExtension = "tar.xz",
+            shellPath = "/bin/bash"
         ),
-        DistroInfo(
+        DistroItem(
             id = "kali",
             name = "Kali Linux",
-            description = "NetHunter/Kali core ARM64 rootfs with penetration testing repos. Rolling.",
-            version = "2024.4",
-            tag = "kali",
-            compressedSize = "~68MB",
-            downloadUrl = "https://kali.download/nethunter-images/current/rootfs/kali-nethunter-rootfs-nano-arm64.tar.xz",
-            archiveName = "kali-nethunter-arm64.tar.xz"
+            badge = "KL",
+            tag = "NetHunter Core",
+            approxSize = "~70MB",
+            description = "Kali Linux ARM64 rootfs with penetration testing repositories.",
+            downloadUrl = "https://raw.githubusercontent.com/EXALAB/Anlinux-Resources/master/Rootfs/Kali/arm64/kali-rootfs-arm64.tar.xz",
+            archiveExtension = "tar.xz",
+            shellPath = "/bin/bash"
         ),
-        DistroInfo(
+        DistroItem(
             id = "arch",
             name = "Arch Linux ARM",
-            description = "Arch Linux ARM64 (aarch64) tarball. Rolling-release, pacman included.",
-            version = "2024.12",
-            tag = "arch",
-            compressedSize = "~58MB",
-            downloadUrl = "http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz",
-            archiveName = "archlinuxarm-aarch64.tar.gz"
+            badge = "AR",
+            tag = "Rolling AArch64",
+            approxSize = "~65MB",
+            description = "Arch Linux ARM64 rootfs featuring the pacman package manager.",
+            downloadUrl = "https://raw.githubusercontent.com/EXALAB/Anlinux-Resources/master/Rootfs/Arch/arm64/arch-rootfs-arm64.tar.xz",
+            archiveExtension = "tar.xz",
+            shellPath = "/bin/bash"
         ),
-        DistroInfo(
+        DistroItem(
             id = "alpine",
             name = "Alpine Linux",
-            description = "Ultra-small (~5MB) musl/busybox environment. Perfect for quick shell & scripts.",
-            version = "3.20",
-            tag = "alpine",
-            compressedSize = "~5MB",
+            badge = "AL",
+            tag = "v3.20 Musl",
+            approxSize = "~5MB",
+            description = "Ultra-lightweight musl/busybox container rootfs.",
             downloadUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.0-aarch64.tar.gz",
-            archiveName = "alpine-minirootfs-aarch64.tar.gz"
-        ),
-        DistroInfo(
-            id = "fedora",
-            name = "Fedora Minimal",
-            description = "Red Hat / Fedora ARM64 cloud-base. dnf-ready, systemd-free in PRoot.",
-            version = "40",
-            tag = "fedora",
-            compressedSize = "~62MB",
-            downloadUrl = "https://download.fedoraproject.org/pub/fedora/linux/releases/40/Container/aarch64/images/Fedora-Container-Base-40-1.14.aarch64.tar.xz",
-            archiveName = "fedora-base-40-aarch64.tar.xz"
+            archiveExtension = "tar.gz",
+            shellPath = "/bin/sh"
         )
     )
 
-    fun get(id: String): DistroInfo? = all.find { it.id == id }
-    val default: DistroInfo get() = all.first { it.isDefault }
+    // Backward-compat aliases — existing code uses `all` and `DistroInfo`
+    val all: List<DistroItem> get() = distros
+    fun get(id: String): DistroItem? = distros.find { it.id == id }
+    val default: DistroItem get() = distros.first { it.id == "debian" }
 }
+
+// Backward-compat helpers for legacy DistroInfo fields
+val DistroItem.compressedSize: String get() = approxSize
+val DistroItem.version: String get() = tag
+val DistroItem.archiveName: String get() = "${id}-rootfs-arm64.${archiveExtension}"
+val DistroItem.isDefault: Boolean get() = id == "debian"
+val DistroItem.sha256: String? get() = null
 
 // ──────────────────────────────────────────────────────────────────────
 // Status
@@ -155,7 +165,7 @@ object DistroDownloader {
 
     fun getDownloadsDir(context: Context): File = File(context.filesDir, "downloads").apply { mkdirs() }
     fun getDistroRoot(context: Context, id: String): File = File(context.filesDir, "distros/$id")
-    fun getDownloadFile(context: Context, info: DistroInfo): File = File(getDownloadsDir(context), "${info.id}.tar.${if (info.archiveName.endsWith(".gz")) "gz" else "xz"}")
+    fun getDownloadFile(context: Context, info: DistroInfo): File = File(getDownloadsDir(context), "${info.id}.tar.${if (info.archiveExtension.endsWith("gz")) "gz" else "xz"}")
 
     fun isInstalled(context: Context, id: String): Boolean {
         val root = getDistroRoot(context, id)
@@ -199,11 +209,14 @@ object DistroDownloader {
         var connection: HttpURLConnection? = null
         try {
             val url = URL(info.downloadUrl)
+            // Per spec: follow 301/302 redirects for EXALAB raw.githubusercontent CDN
+            HttpURLConnection.setFollowRedirects(true)
             connection = (url.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 15000
                 readTimeout = 30000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "ShellZero/1.0 (Linux; Android aarch64)")
+                // followSslRedirects equivalent for HttpURLConnection
+                setRequestProperty("User-Agent", "VASTAVIK-CLI-Agent/2.0")
             }
             connection.connect()
             val responseCode = connection.responseCode
@@ -284,8 +297,8 @@ object DistroDownloader {
             }
             destDir.mkdirs()
 
-            val isGz = info.archiveName.endsWith(".gz") || archiveFile.name.endsWith(".gz")
-            val isXz = info.archiveName.endsWith(".xz") || archiveFile.name.endsWith(".xz")
+            val isGz = info.archiveExtension.endsWith("gz") || archiveFile.name.endsWith(".gz")
+            val isXz = info.archiveExtension.endsWith("xz") || archiveFile.name.endsWith(".xz")
 
             FileInputStream(archiveFile).use { fis ->
                 BufferedInputStream(fis).use { bis ->
@@ -381,18 +394,25 @@ object DistroDownloader {
 
     /**
      * Launch Session: spawns new terminal session isolated inside distro's rootfs via PRoot.
+     * VASTAVIK CLI fix: uses dynamic rootfsDirectory and shellPath to prevent Kali→Debian bug.
      */
     fun launchSession(context: Context, info: DistroInfo, rows: Int = 24, cols: Int = 80): Boolean {
-        if (!isInstalled(context, info.id)) {
-            Log.w(TAG, "launchSession failed: ${info.id} not installed")
+        val distroRootfs = File(context.filesDir, "distros/${info.id}")
+        // Also check legacy debian path for backward compat
+        val isInstalledCheck = isInstalled(context, info.id) || distroRootfs.exists()
+        if (!isInstalledCheck) {
+            Log.w(TAG, "launchSession failed: ${info.id} not installed at ${distroRootfs.absolutePath}")
             statusFlow(info.id).value = DistroStatus.Error("Not installed")
+            try { android.widget.Toast.makeText(context, "${info.name} is not extracted yet.", android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
             return false
         }
-        // Delegate to SessionManager
-        com.shellzero.terminal.SessionManager.createSession(
+        // Delegate to SessionManager with explicit rootfsDirectory and shellPath per spec
+        com.shellzero.terminal.SessionManager.createNewSession(
             context = context,
+            distroName = info.name,
             distroId = info.id,
-            distroName = info.name
+            rootfsDirectory = distroRootfs.absolutePath,
+            shellPath = info.shellPath
         )
         Log.i(TAG, "Launched session for ${info.id}")
         return true
@@ -413,7 +433,7 @@ object DistroDownloader {
             }
         } catch (_: Exception) {}
         val dns = """
-            # ShellZero auto-generated resolv.conf
+            # VASTAVIK CLI auto-generated resolv.conf
             nameserver 1.1.1.1
             nameserver 8.8.8.8
             nameserver 9.9.9.9
