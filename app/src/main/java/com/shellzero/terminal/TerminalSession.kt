@@ -77,11 +77,19 @@ class TerminalSession(
             else -> isolatedFallback
         }
         // VASTAVIK CLI Critical Fix: ensure proot exists and handle shell fallback + guest dirs
+        // Use blocking wrapper since start() is not suspend; ProotManager also supports suspend with onStatusUpdate
         val prootBinary = try {
-            com.shellzero.installer.ProotManager.ensureProotInstalled(context)
+            com.shellzero.installer.ProotManager.ensureProotInstalledBlocking(context)
         } catch (e: Exception) {
             Log.e(TAG, "Proot not available", e)
             appendToBuffer("Failed to start shell: proot binary missing (${e.message})\r\n")
+            // Also try suspend version with status update for UI
+            try {
+                appendToBuffer("Attempting to fetch PRoot engine...\r\n")
+                kotlinx.coroutines.runBlocking {
+                    com.shellzero.installer.ProotManager.ensureProotInstalled(context) { msg -> appendToBuffer("$msg\r\n") }
+                }
+            } catch (_: Exception) {}
             return
         }
 
