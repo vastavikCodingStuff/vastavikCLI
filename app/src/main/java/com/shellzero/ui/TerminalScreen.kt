@@ -332,6 +332,31 @@ fun TerminalScreen(
                     .fillMaxWidth()
                     .background(TerminalBg)
                     .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .focusRequester(focusRequester)
+                    .focusable()
+                    .onKeyEvent { keyEvent ->
+                        if (keyEvent.type == KeyEventType.KeyDown) {
+                            // Hardware PC keyboard handling per spec (BlueStacks)
+                            when (keyEvent.nativeKeyEvent.keyCode) {
+                                AndroidKeyEvent.KEYCODE_ENTER -> { viewModel.sendRawBytes("\r"); return@onKeyEvent true }
+                                AndroidKeyEvent.KEYCODE_DEL -> { viewModel.sendRawBytes("\u007F"); return@onKeyEvent true }
+                                AndroidKeyEvent.KEYCODE_TAB -> { viewModel.sendRawBytes("\t"); return@onKeyEvent true }
+                                AndroidKeyEvent.KEYCODE_ESCAPE -> { viewModel.sendRawBytes("\u001b"); return@onKeyEvent true }
+                                AndroidKeyEvent.KEYCODE_DPAD_UP -> { viewModel.sendRawBytes("\u001b[A"); return@onKeyEvent true }
+                                AndroidKeyEvent.KEYCODE_DPAD_DOWN -> { viewModel.sendRawBytes("\u001b[B"); return@onKeyEvent true }
+                                AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> { viewModel.sendRawBytes("\u001b[C"); return@onKeyEvent true }
+                                AndroidKeyEvent.KEYCODE_DPAD_LEFT -> { viewModel.sendRawBytes("\u001b[D"); return@onKeyEvent true }
+                                else -> {
+                                    val unicodeChar = keyEvent.nativeKeyEvent.unicodeChar
+                                    if (unicodeChar != 0) {
+                                        viewModel.sendInput(unicodeChar.toChar().toString())
+                                        return@onKeyEvent true
+                                    }
+                                }
+                            }
+                        }
+                        false
+                    }
                     .clickable(
                         interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                         indication = null
